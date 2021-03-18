@@ -1,6 +1,6 @@
 /* vim: tabstop=4 shiftwidth=4 noexpandtab
  *
- * Kevin Lange's Slab Allocator
+ * klange's Slab Allocator
  *
  * Implemented for CS241, Fall 2010, machine problem 7
  * at the University of Illinois, Urbana-Champaign.
@@ -8,9 +8,9 @@
  * Overall competition winner for speed.
  * Well ranked in memory usage.
  *
- * Copyright (c) 2010 Kevin Lange.  All rights reserved.
+ * Copyright (c) 2010-2018 K. Lange.  All rights reserved.
  *
- * Developed by: Kevin Lange <lange7@acm.uiuc.edu>
+ * Developed by: K. Lange <klange@toaruos.org>
  *               Dave Majnemer <dmajnem2@acm.uiuc.edu>
  *               Assocation for Computing Machinery
  *               University of Illinois, Urbana-Champaign
@@ -102,7 +102,7 @@
 **/
 
 /* Includes {{{ */
-#include <system.h>
+#include <kernel/system.h>
 /* }}} */
 /* Definitions {{{ */
 
@@ -124,6 +124,44 @@
 
 /* }}} */
 
+//#define _DEBUG_MALLOC
+
+#ifdef _DEBUG_MALLOC
+#define EARLY_LOG_DEVICE 0x3F8
+static uint32_t _kmalloc_log_write(fs_node_t *node, uint64_t offset, uint32_t size, uint8_t *buffer) {
+	for (unsigned int i = 0; i < size; ++i) {
+		outportb(EARLY_LOG_DEVICE, buffer[i]);
+	}
+	return size;
+}
+static fs_node_t _kmalloc_log = { .write = &_kmalloc_log_write };
+extern uintptr_t map_to_physical(uintptr_t virtual);
+
+#define HALT_ON(_addr) do { \
+		if ((uintptr_t)ptr == _addr) { \
+			IRQ_OFF; \
+			struct { \
+				char c; \
+				uint32_t addr; \
+				uint32_t size; \
+				uint32_t extra; \
+				uint32_t eip; \
+			} __attribute__((packed)) log = {'h',_addr,0,0,0}; \
+			write_fs(&_kmalloc_log, 0, sizeof(log), (uint8_t *)&log); \
+			while (1) {} \
+		} } while (0)
+
+#define STACK_TRACE(base)  \
+		uint32_t _eip = 0; \
+		unsigned int * ebp = (unsigned int *)(&(base) - 2); \
+		for (unsigned int frame = 0; frame < 1; ++frame) { \
+			unsigned int eip = ebp[1]; \
+			if (eip == 0) break; \
+			ebp = (unsigned int *)(ebp[0]); \
+			_eip = eip; \
+		}
+#endif
+
 /*
  * Internal functions.
  */
@@ -137,14 +175,56 @@ static spin_lock_t mem_lock =  { 0 };
 
 void * __attribute__ ((malloc)) malloc(uintptr_t size) {
 	spin_lock(mem_lock);
+#ifdef _DEBUG_MALLOC
+	size += 8;
+#endif
 	void * ret = klmalloc(size);
+#ifdef _DEBUG_MALLOC
+	STACK_TRACE(size);
+	if (ret) {
+		char * c = ret;
+		uintptr_t s = size-8;
+		memcpy(&c[size-4],&s,sizeof(uintptr_t));
+		s = 0xDEADBEEF;
+		memcpy(&c[size-8],&s,sizeof(uintptr_t));
+	}
+	struct {
+		char c;
+		uint32_t addr;
+		uint32_t size;
+		uint32_t extra;
+		uint32_t eip;
+	} __attribute__((packed)) log = {'m',(uint32_t)ret,size-8,0xDEADBEEF,_eip};
+	write_fs(&_kmalloc_log, 0, sizeof(log), (uint8_t *)&log);
+#endif
 	spin_unlock(mem_lock);
 	return ret;
 }
 
 void * __attribute__ ((malloc)) realloc(void * ptr, uintptr_t size) {
 	spin_lock(mem_lock);
+#ifdef _DEBUG_MALLOC
+	size += 8;
+#endif
 	void * ret = klrealloc(ptr, size);
+#ifdef _DEBUG_MALLOC
+	STACK_TRACE(ptr);
+	if (ret) {
+		char * c = ret;
+		uintptr_t s = size-8;
+		memcpy(&c[size-4],&s,sizeof(uintptr_t));
+		s = 0xDEADBEEF;
+		memcpy(&c[size-8],&s,sizeof(uintptr_t));
+	}
+	struct {
+		char c;
+		uint32_t addr;
+		uint32_t size;
+		uint32_t extra;
+		uint32_t eip;
+	} __attribute__((packed)) log = {'r',(uint32_t)ptr,size-8,(uint32_t)ret,_eip};
+	write_fs(&_kmalloc_log, 0, sizeof(log), (uint8_t *)&log);
+#endif
 	spin_unlock(mem_lock);
 	return ret;
 }
@@ -152,13 +232,44 @@ void * __attribute__ ((malloc)) realloc(void * ptr, uintptr_t size) {
 void * __attribute__ ((malloc)) calloc(uintptr_t nmemb, uintptr_t size) {
 	spin_lock(mem_lock);
 	void * ret = klcalloc(nmemb, size);
+#ifdef _DEBUG_MALLOC
+	struct {
+		char c;
+		uint32_t addr;
+		uint32_t size;
+		uint32_t extra;
+		uint32_t eip;
+	} __attribute__((packed)) log = {'c',(uint32_t)ret,size,nmemb,0};
+	write_fs(&_kmalloc_log, 0, sizeof(log), (uint8_t *)&log);
+#endif
 	spin_unlock(mem_lock);
 	return ret;
 }
 
 void * __attribute__ ((malloc)) valloc(uintptr_t size) {
 	spin_lock(mem_lock);
+#ifdef _DEBUG_MALLOC
+	size += 8;
+#endif
 	void * ret = klvalloc(size);
+#ifdef _DEBUG_MALLOC
+	STACK_TRACE(size);
+	if (ret) {
+		char * c = ret;
+		uintptr_t s = size-8;
+		memcpy(&c[size-4],&s,sizeof(uintptr_t));
+		s = 0xDEADBEEF;
+		memcpy(&c[size-8],&s,sizeof(uintptr_t));
+	}
+	struct {
+		char c;
+		uint32_t addr;
+		uint32_t size;
+		uint32_t extra;
+		uint32_t eip;
+	} __attribute__((packed)) log = {'v',(uint32_t)ret,size-8,0xDEADBEEF,_eip};
+	write_fs(&_kmalloc_log, 0, sizeof(log), (uint8_t *)&log);
+#endif
 	spin_unlock(mem_lock);
 	return ret;
 }
@@ -166,6 +277,42 @@ void * __attribute__ ((malloc)) valloc(uintptr_t size) {
 void free(void * ptr) {
 	spin_lock(mem_lock);
 	if ((uintptr_t)ptr > placement_pointer) {
+#ifdef _DEBUG_MALLOC
+		IRQ_OFF;
+
+		STACK_TRACE(ptr);
+
+		char * tag = ptr;
+		uintptr_t i = 0;
+		uint32_t * x;
+		int _failed = 1;
+		while (i < 0x40000) {
+			x = (uint32_t*)(tag + i);
+			if (map_to_physical((uintptr_t)x) == 0 || map_to_physical((uintptr_t)x + 8) == 0) {
+				x = (uint32_t *)tag;
+				break;
+			}
+			page_t * page = get_page((uintptr_t)x, 0, current_directory);
+			if (page->present != 1) break;
+			page = get_page((uintptr_t)x + 8, 0, current_directory);
+			if (page->present != 1) break;
+			if (*x == 0xDEADBEEF) {
+				if (x[1] == i) {
+					_failed = 0;
+					break;
+				}
+			}
+			i++;
+		}
+		struct {
+			char c;
+			uint32_t addr;
+			uint32_t size;
+			uint32_t extra;
+			uint32_t eip;
+		} __attribute__((packed)) log = {'f',(uint32_t)ptr,_failed ? 0xFFFFFFFF : x[1],_failed ? 0xFFFFFFFF : x[0],_eip};
+		write_fs(&_kmalloc_log, 0, sizeof(log), (uint8_t *)&log);
+#endif
 		klfree(ptr);
 	}
 	spin_unlock(mem_lock);

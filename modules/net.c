@@ -1,15 +1,18 @@
 /* vim: tabstop=4 shiftwidth=4 noexpandtab
  * This file is part of ToaruOS and is released under the terms
  * of the NCSA / University of Illinois License - see LICENSE.md
- * Copyright (C) 2014 Kevin Lange
+ * Copyright (C) 2014-2018 K. Lange
  */
-#include <module.h>
-#include <logging.h>
-#include <hashmap.h>
-#include <ipv4.h>
-#include <printf.h>
-#include <tokenize.h>
-#include <mod/net.h>
+#include <kernel/module.h>
+#include <kernel/logging.h>
+#include <kernel/ipv4.h>
+#include <kernel/printf.h>
+#include <kernel/tokenize.h>
+#include <kernel/mod/net.h>
+#include <kernel/mod/procfs.h>
+
+#include <toaru/list.h>
+#include <toaru/hashmap.h>
 
 static hashmap_t * dns_cache;
 static list_t * dns_waiters = NULL;
@@ -29,12 +32,74 @@ static struct netif _netif = {0};
 
 static int tasklet_pid = 0;
 
+uint32_t get_primary_dns(void);
+
+static uint32_t netif_func(fs_node_t *node, uint64_t offset, uint32_t size, uint8_t *buffer) {
+	char * buf = malloc(4096);
+
+	struct netif * netif = &_netif;
+	char ip[16];
+	ip_ntoa(netif->source, ip);
+	char dns[16];
+	ip_ntoa(get_primary_dns(), dns);
+	char gw[16];
+	ip_ntoa(netif->gateway, gw);
+
+	if (netif->hwaddr[0] == 0 &&
+		netif->hwaddr[1] == 0 &&
+		netif->hwaddr[2] == 0 &&
+		netif->hwaddr[3] == 0 &&
+		netif->hwaddr[4] == 0 &&
+		netif->hwaddr[5] == 0) {
+
+		sprintf(buf, "no network\n");
+	} else {
+		sprintf(buf,
+			"ip:\t%s\n"
+			"mac:\t%2x:%2x:%2x:%2x:%2x:%2x\n"
+			"device:\t%s\n"
+			"dns:\t%s\n"
+			"gateway:\t%s\n"
+			,
+			ip,
+			netif->hwaddr[0], netif->hwaddr[1], netif->hwaddr[2], netif->hwaddr[3], netif->hwaddr[4], netif->hwaddr[5],
+			netif->driver,
+			dns,
+			gw
+		);
+	}
+
+	size_t _bsize = strlen(buf);
+	if (offset > _bsize) {
+		free(buf);
+		return 0;
+	}
+	if (size > _bsize - offset) size = _bsize - offset;
+
+	memcpy(buffer, buf + offset, size);
+	free(buf);
+	return size;
+}
+
+static struct procfs_entry netif_entry = {
+	0, /* filled by install */
+	"netif",
+	netif_func,
+};
+
 void init_netif_funcs(get_mac_func mac_func, get_packet_func get_func, send_packet_func send_func, char * device) {
 	_netif.get_mac = mac_func;
 	_netif.get_packet = get_func;
 	_netif.send_packet = send_func;
 	_netif.driver = device;
 	memcpy(_netif.hwaddr, _netif.get_mac(), sizeof(_netif.hwaddr));
+
+	if (!netif_entry.id) {
+		int (*procfs_install)(struct procfs_entry *) = (int (*)(struct procfs_entry *))(uintptr_t)hashmap_get(modules_get_symbols(),"procfs_install");
+		if (procfs_install) {
+			procfs_install(&netif_entry);
+		}
+	}
 
 	if (!tasklet_pid) {
 		tasklet_pid = create_kernel_tasklet(net_handler, "[net]", NULL);
@@ -337,6 +402,10 @@ static void socket_alert_waiters(struct socket * sock) {
 static int socket_check(fs_node_t * node) {
 	struct socket * sock = node->device;
 
+	if (sock->bytes_available) {
+		return 0;
+	}
+
 	if (sock->packet_queue->length > 0) {
 		return 0;
 	}
@@ -355,7 +424,7 @@ static int socket_wait(fs_node_t * node, void * process) {
 	return 0;
 }
 
-static uint32_t socket_read(fs_node_t * node, uint32_t offset, uint32_t size, uint8_t * buffer) {
+static uint32_t socket_read(fs_node_t * node, uint64_t offset, uint32_t size, uint8_t * buffer) {
 	/* Sleep until we have something to receive */
 #if 0
 	fgets((char *)buffer, size, node->device);
@@ -364,7 +433,7 @@ static uint32_t socket_read(fs_node_t * node, uint32_t offset, uint32_t size, ui
 	return net_recv(node->device, buffer, size);
 #endif
 }
-static uint32_t socket_write(fs_node_t * node, uint32_t offset, uint32_t size, uint8_t * buffer) {
+static uint32_t socket_write(fs_node_t * node, uint64_t offset, uint32_t size, uint8_t * buffer) {
 	/* Add the packet to the appropriate interface queue and send it off. */
 
 	net_send((struct socket *)node->device, buffer, size, 0);
@@ -457,6 +526,15 @@ static int gethost(char * name, uint32_t * ip) {
 	}
 }
 
+static int net_send_tcp(struct socket *socket, uint16_t flags, uint8_t * payload, uint32_t payload_size);
+
+static void socket_close(fs_node_t * node) {
+	debug_print(WARNING, "Closing socket");
+	struct socket * sock = node->device;
+	if (sock->status == 1) return; /* already closed */
+	net_send_tcp(sock, TCP_FLAGS_ACK | TCP_FLAGS_FIN, NULL, 0);
+	sock->status = 2;
+}
 
 /* TODO: socket_close - TCP close; UDP... just clean us up */
 /* TODO: socket_open - idk, whatever */
@@ -486,6 +564,7 @@ static fs_node_t * finddir_netfs(fs_node_t * node, char * name) {
 	fnode->flags   = FS_CHARDEVICE;
 	fnode->read    = socket_read;
 	fnode->write   = socket_write;
+	fnode->close   = socket_close;
 	fnode->device  = (void *)net_open(SOCK_STREAM);
 	fnode->selectcheck = socket_check;
 	fnode->selectwait = socket_wait;
@@ -737,7 +816,7 @@ size_t net_recv(struct socket* socket, uint8_t* buffer, size_t len) {
 		free(node);
 	}
 
-	size_to_read = MIN(len, offset + socket->bytes_available);
+	size_to_read = MIN(len, socket->bytes_available);
 
 	if (tcpdata->payload != 0) {
 		memcpy(buffer + offset, tcpdata->payload + socket->bytes_read, size_to_read);
@@ -746,8 +825,8 @@ size_t net_recv(struct socket* socket, uint8_t* buffer, size_t len) {
 	offset += size_to_read;
 
 	if (size_to_read < socket->bytes_available) {
-		socket->bytes_available = socket->bytes_available - size_to_read;
-		socket->bytes_read = size_to_read;
+		socket->bytes_available -= size_to_read;
+		socket->bytes_read += size_to_read;
 		socket->current_packet = tcpdata;
 	} else {
 		socket->bytes_available = 0;
@@ -771,8 +850,21 @@ static void net_handle_tcp(struct tcp_header * tcp, size_t length) {
 	if (hashmap_has(_tcp_sockets, (void *)ntohs(tcp->destination_port))) {
 		struct socket *socket = hashmap_get(_tcp_sockets, (void *)ntohs(tcp->destination_port));
 
+		if (socket->status == 2) {
+			debug_print(WARNING, "Received packet while connection is in 'closing' statuus");
+		}
+
 		if (socket->status == 1) {
-			debug_print(ERROR, "Socket is closed, but still receiving packets. Should send FIN. socket=0x%x", socket);
+			if ((htons(tcp->flags) & TCP_FLAGS_FIN)) {
+				debug_print(WARNING, "TCP close sequence continues");
+				return;
+			}
+			if ((htons(tcp->flags) & TCP_FLAGS_ACK)) {
+				debug_print(WARNING, "TCP close sequence continues");
+				return;
+			}
+			debug_print(ERROR, "Socket is closed? Should send FIN. socket=0x%x flags=0x%x", socket, tcp->flags);
+			net_send_tcp(socket, TCP_FLAGS_FIN | TCP_FLAGS_ACK, NULL, 0);
 			return;
 		}
 

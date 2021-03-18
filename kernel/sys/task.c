@@ -1,17 +1,17 @@
 /* vim: tabstop=4 shiftwidth=4 noexpandtab
  * This file is part of ToaruOS and is released under the terms
  * of the NCSA / University of Illinois License - see LICENSE.md
- * Copyright (C) 2011-2014 Kevin Lange
+ * Copyright (C) 2011-2018 K. Lange
  * Copyright (C) 2012 Markus Schober
  *
  * Task Switching and Management Functions
  *
  */
-#include <system.h>
-#include <process.h>
-#include <logging.h>
-#include <shm.h>
-#include <mem.h>
+#include <kernel/system.h>
+#include <kernel/process.h>
+#include <kernel/logging.h>
+#include <kernel/shm.h>
+#include <kernel/mem.h>
 
 #define TASK_MAGIC 0xDEADBEEF
 
@@ -218,6 +218,7 @@ uint32_t fork(void) {
 
 	new_proc->thread.esp = esp;
 	new_proc->thread.ebp = ebp;
+	new_proc->thread.gsbase = current_process->thread.gsbase;
 
 	new_proc->is_tasklet = parent->is_tasklet;
 
@@ -272,6 +273,7 @@ int create_kernel_tasklet(tasklet_t tasklet, char * name, void * argp) {
 
 	new_proc->thread.esp = esp;
 	new_proc->thread.ebp = ebp;
+	new_proc->thread.gsbase = current_process->thread.gsbase;
 
 	new_proc->thread.eip = (uintptr_t)tasklet;
 
@@ -339,6 +341,7 @@ clone(uintptr_t new_stack, uintptr_t thread_func, uintptr_t arg) {
 
 	new_proc->thread.esp = esp;
 	new_proc->thread.ebp = ebp;
+	new_proc->thread.gsbase = current_process->thread.gsbase;
 
 	new_proc->is_tasklet = parent->is_tasklet;
 
@@ -405,6 +408,7 @@ void switch_task(uint8_t reschedule) {
 	current_process->thread.eip = eip;
 	current_process->thread.esp = esp;
 	current_process->thread.ebp = ebp;
+	current_process->thread.gsbase = gdt_get_gsbase();
 	current_process->running = 0;
 
 	/* Save floating point state */
@@ -432,6 +436,7 @@ void switch_next(void) {
 	eip = current_process->thread.eip;
 	esp = current_process->thread.esp;
 	ebp = current_process->thread.ebp;
+	gdt_set_gsbase(current_process->thread.gsbase);
 	unswitch_fpu();
 
 	/* Validate */
@@ -516,6 +521,7 @@ void task_exit(int retval) {
 	process_t * parent = process_get_parent((process_t *)current_process);
 
 	if (parent && !parent->finished) {
+		send_signal(parent->group, SIGCHLD, 1);
 		wakeup_queue(parent->wait_queue);
 	}
 

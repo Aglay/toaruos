@@ -1,20 +1,21 @@
 /* vim: tabstop=4 shiftwidth=4 noexpandtab
  * This file is part of ToaruOS and is released under the terms
  * of the NCSA / University of Illinois License - see LICENSE.md
- * Copyright (C) 2016 Kevin Lange
+ * Copyright (C) 2016-2018 K. Lange
  *
  * ISO 9660 filesystem driver (for CDs)
  */
-#include <system.h>
-#include <types.h>
-#include <fs.h>
-#include <logging.h>
-#include <module.h>
-#include <args.h>
-#include <printf.h>
-#include <hashmap.h>
-#include <list.h>
-#include <tokenize.h>
+#include <kernel/system.h>
+#include <kernel/types.h>
+#include <kernel/fs.h>
+#include <kernel/logging.h>
+#include <kernel/module.h>
+#include <kernel/args.h>
+#include <kernel/printf.h>
+#include <kernel/tokenize.h>
+
+#include <toaru/list.h>
+#include <toaru/hashmap.h>
 
 #define ISO_SECTOR_SIZE 2048
 
@@ -268,7 +269,7 @@ cleanup:
 	return dirent;
 }
 
-static uint32_t read_iso(fs_node_t * node, uint32_t offset, uint32_t size, uint8_t * buffer) {
+static uint32_t read_iso(fs_node_t * node, uint64_t offset, uint32_t size, uint8_t * buffer) {
 	iso_9660_fs_t * this = node->device;
 	char * tmp = malloc(this->block_size);
 	read_sector(this, node->inode, tmp);
@@ -380,7 +381,7 @@ static void file_from_dir_entry(iso_9660_fs_t * this, size_t sector, iso_9660_di
 	fs->uid = 0;
 	fs->gid = 0;
 	fs->length = dir->extent_length_LSB;
-	fs->mask = 0444;
+	fs->mask = 0555;
 	fs->nlink = 0; /* Unsupported */
 	if (dir->flags & FLAG_DIRECTORY) {
 		fs->flags = FS_DIRECTORY;

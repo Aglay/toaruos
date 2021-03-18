@@ -1,17 +1,17 @@
 /* vim: tabstop=4 shiftwidth=4 noexpandtab
  * This file is part of ToaruOS and is released under the terms
  * of the NCSA / University of Illinois License - see LICENSE.md
- * Copyright (C) 2014 Kevin Lange
+ * Copyright (C) 2014-2018 K. Lange
  */
-#include <system.h>
-#include <types.h>
-#include <fs.h>
-#include <ext2.h>
-#include <logging.h>
-#include <module.h>
-#include <args.h>
-#include <printf.h>
-#include <tokenize.h>
+#include <kernel/system.h>
+#include <kernel/types.h>
+#include <kernel/fs.h>
+#include <kernel/ext2.h>
+#include <kernel/logging.h>
+#include <kernel/module.h>
+#include <kernel/args.h>
+#include <kernel/printf.h>
+#include <kernel/tokenize.h>
 
 #define EXT2_BGD_BLOCK 2
 
@@ -769,8 +769,8 @@ static unsigned int allocate_inode(ext2_fs_t * this) {
 	return node_no;
 }
 
-static void mkdir_ext2(fs_node_t * parent, char * name, uint16_t permission) {
-	if (!name) return;
+static int mkdir_ext2(fs_node_t * parent, char * name, uint16_t permission) {
+	if (!name) return -EINVAL;
 
 	ext2_fs_t * this = parent->device;
 
@@ -779,7 +779,7 @@ static void mkdir_ext2(fs_node_t * parent, char * name, uint16_t permission) {
 	if (check) {
 		debug_print(WARNING, "A file by this name already exists: %s", name);
 		free(check);
-		return; /* this should probably have a return value... */
+		return -EEXIST;
 	}
 
 	/* Allocate an inode for it */
@@ -827,7 +827,8 @@ static void mkdir_ext2(fs_node_t * parent, char * name, uint16_t permission) {
 	write_inode(this, inode, inode_no);
 
 	uint8_t * tmp = malloc(this->block_size);
-	ext2_dir_t * t = calloc(12,1);
+	ext2_dir_t * t = malloc(12);
+	memset(t, 0, 12);
 	t->inode = inode_no;
 	t->rec_len = 12;
 	t->name_len = 1;
@@ -860,10 +861,11 @@ static void mkdir_ext2(fs_node_t * parent, char * name, uint16_t permission) {
 
 	ext2_sync(this);
 
+	return 0;
 }
 
-static void create_ext2(fs_node_t * parent, char * name, uint16_t permission) {
-	if (!name) return;
+static int create_ext2(fs_node_t * parent, char * name, uint16_t permission) {
+	if (!name) return -EINVAL;
 
 	ext2_fs_t * this = parent->device;
 
@@ -872,7 +874,7 @@ static void create_ext2(fs_node_t * parent, char * name, uint16_t permission) {
 	if (check) {
 		debug_print(WARNING, "A file by this name already exists: %s", name);
 		free(check);
-		return; /* this should probably have a return value... */
+		return -EEXIST;
 	}
 
 	/* Allocate an inode for it */
@@ -921,6 +923,7 @@ static void create_ext2(fs_node_t * parent, char * name, uint16_t permission) {
 
 	ext2_sync(this);
 
+	return 0;
 }
 
 static int chmod_ext2(fs_node_t * node, int mode) {
@@ -1041,7 +1044,7 @@ static fs_node_t * finddir_ext2(fs_node_t *node, char *name) {
 	return outnode;
 }
 
-static void unlink_ext2(fs_node_t * node, char * name) {
+static int unlink_ext2(fs_node_t * node, char * name) {
 	/* XXX this is a very bad implementation */
 	ext2_fs_t * this = (ext2_fs_t *)node->device;
 
@@ -1085,7 +1088,7 @@ static void unlink_ext2(fs_node_t * node, char * name) {
 	free(inode);
 	if (!direntry) {
 		free(block);
-		return;
+		return -ENOENT;
 	}
 
 	direntry->inode = 0;
@@ -1094,6 +1097,8 @@ static void unlink_ext2(fs_node_t * node, char * name) {
 	free(block);
 
 	ext2_sync(this);
+
+	return 0;
 }
 
 
@@ -1127,7 +1132,7 @@ static ext2_inodetable_t * read_inode(ext2_fs_t * this, uint32_t inode) {
 	return inodet;
 }
 
-static uint32_t read_ext2(fs_node_t *node, uint32_t offset, uint32_t size, uint8_t *buffer) {
+static uint32_t read_ext2(fs_node_t *node, uint64_t offset, uint32_t size, uint8_t *buffer) {
 	ext2_fs_t * this = (ext2_fs_t *)node->device;
 	ext2_inodetable_t * inode = read_inode(this, node->inode);
 	uint32_t end;
@@ -1145,14 +1150,14 @@ static uint32_t read_ext2(fs_node_t *node, uint32_t offset, uint32_t size, uint8
 	uint8_t * buf = malloc(this->block_size);
 	if (start_block == end_block) {
 		inode_read_block(this, inode, start_block, buf);
-		memcpy(buffer, (uint8_t *)(((uint32_t)buf) + (offset % this->block_size)), size_to_read);
+		memcpy(buffer, (uint8_t *)(((uint32_t)buf) + ((uintptr_t)offset % this->block_size)), size_to_read);
 	} else {
 		uint32_t block_offset;
 		uint32_t blocks_read = 0;
 		for (block_offset = start_block; block_offset < end_block; block_offset++, blocks_read++) {
 			if (block_offset == start_block) {
 				inode_read_block(this, inode, block_offset, buf);
-				memcpy(buffer, (uint8_t *)(((uint32_t)buf) + (offset % this->block_size)), this->block_size - (offset % this->block_size));
+				memcpy(buffer, (uint8_t *)(((uint32_t)buf) + ((uintptr_t)offset % this->block_size)), this->block_size - (offset % this->block_size));
 			} else {
 				inode_read_block(this, inode, block_offset, buf);
 				memcpy(buffer + this->block_size * blocks_read - (offset % this->block_size), buf, this->block_size);
@@ -1168,7 +1173,7 @@ static uint32_t read_ext2(fs_node_t *node, uint32_t offset, uint32_t size, uint8
 	return size_to_read;
 }
 
-static uint32_t write_inode_buffer(ext2_fs_t * this, ext2_inodetable_t * inode, uint32_t inode_number, uint32_t offset, uint32_t size, uint8_t *buffer) {
+static uint32_t write_inode_buffer(ext2_fs_t * this, ext2_inodetable_t * inode, uint32_t inode_number, uint64_t offset, uint32_t size, uint8_t *buffer) {
 	uint32_t end = offset + size;
 	if (end > inode->size) {
 		inode->size = end;
@@ -1182,7 +1187,7 @@ static uint32_t write_inode_buffer(ext2_fs_t * this, ext2_inodetable_t * inode, 
 	uint8_t * buf = malloc(this->block_size);
 	if (start_block == end_block) {
 		inode_read_block(this, inode, start_block, buf);
-		memcpy((uint8_t *)(((uint32_t)buf) + (offset % this->block_size)), buffer, size_to_read);
+		memcpy((uint8_t *)(((uint32_t)buf) + ((uintptr_t)offset % this->block_size)), buffer, size_to_read);
 		inode_write_block(this, inode, inode_number, start_block, buf);
 	} else {
 		uint32_t block_offset;
@@ -1190,7 +1195,7 @@ static uint32_t write_inode_buffer(ext2_fs_t * this, ext2_inodetable_t * inode, 
 		for (block_offset = start_block; block_offset < end_block; block_offset++, blocks_read++) {
 			if (block_offset == start_block) {
 				int b = inode_read_block(this, inode, block_offset, buf);
-				memcpy((uint8_t *)(((uint32_t)buf) + (offset % this->block_size)), buffer, this->block_size - (offset % this->block_size));
+				memcpy((uint8_t *)(((uint32_t)buf) + ((uintptr_t)offset % this->block_size)), buffer, this->block_size - (offset % this->block_size));
 				inode_write_block(this, inode, inode_number, block_offset, buf);
 				if (!b) {
 					refresh_inode(this, inode, inode_number);
@@ -1214,7 +1219,7 @@ static uint32_t write_inode_buffer(ext2_fs_t * this, ext2_inodetable_t * inode, 
 	return size_to_read;
 }
 
-static uint32_t write_ext2(fs_node_t *node, uint32_t offset, uint32_t size, uint8_t *buffer) {
+static uint32_t write_ext2(fs_node_t *node, uint64_t offset, uint32_t size, uint8_t *buffer) {
 	ext2_fs_t * this = (ext2_fs_t *)node->device;
 	ext2_inodetable_t * inode = read_inode(this, node->inode);
 
@@ -1223,15 +1228,15 @@ static uint32_t write_ext2(fs_node_t *node, uint32_t offset, uint32_t size, uint
 	return rv;
 }
 
-static void open_ext2(fs_node_t *node, unsigned int flags) {
+static void truncate_ext2(fs_node_t * node) {
 	ext2_fs_t * this = node->device;
+	ext2_inodetable_t * inode = read_inode(this,node->inode);
+	inode->size = 0;
+	write_inode(this, inode, node->inode);
+}
 
-	if (flags & O_TRUNC) {
-		/* Uh, herp */
-		ext2_inodetable_t * inode = read_inode(this,node->inode);
-		inode->size = 0;
-		write_inode(this, inode, node->inode);
-	}
+static void open_ext2(fs_node_t *node, unsigned int flags) {
+	/* Nothing to do here */
 }
 
 static void close_ext2(fs_node_t *node) {
@@ -1262,8 +1267,8 @@ static struct dirent * readdir_ext2(fs_node_t *node, uint32_t index) {
 	return dirent;
 }
 
-static void symlink_ext2(fs_node_t * parent, char * target, char * name) {
-	if (!name) return;
+static int symlink_ext2(fs_node_t * parent, char * target, char * name) {
+	if (!name) return -EINVAL;
 
 	ext2_fs_t * this = parent->device;
 
@@ -1272,7 +1277,7 @@ static void symlink_ext2(fs_node_t * parent, char * target, char * name) {
 	if (check) {
 		debug_print(WARNING, "A file by this name already exists: %s", name);
 		free(check);
-		return; /* this should probably have a return value... */
+		return -EEXIST; /* this should probably have a return value... */
 	}
 
 	/* Allocate an inode for it */
@@ -1332,6 +1337,8 @@ static void symlink_ext2(fs_node_t * parent, char * target, char * name) {
 	free(inode);
 
 	ext2_sync(this);
+
+	return 0;
 }
 
 static int readlink_ext2(fs_node_t * node, char * buf, size_t size) {
@@ -1383,6 +1390,7 @@ static uint32_t node_from_file(ext2_fs_t * this, ext2_inodetable_t *inode, ext2_
 		fnode->finddir  = NULL;
 		fnode->symlink  = NULL;
 		fnode->readlink = NULL;
+		fnode->truncate = truncate_ext2;
 	}
 	if ((inode->mode & EXT2_S_IFDIR) == EXT2_S_IFDIR) {
 		fnode->flags   |= FS_DIRECTORY;
@@ -1537,7 +1545,8 @@ static fs_node_t * mount_ext2(fs_node_t * block_device, int flags) {
 	if (!(this->flags & EXT2_FLAG_NOCACHE)) {
 		debug_print(INFO, "Allocating cache...");
 		DC = malloc(sizeof(ext2_disk_cache_entry_t) * this->cache_entries);
-		this->cache_data = calloc(this->block_size, this->cache_entries);
+		this->cache_data = malloc(this->block_size * this->cache_entries);
+		memset(this->cache_data, 0, this->block_size * this->cache_entries);
 		for (uint32_t i = 0; i < this->cache_entries; ++i) {
 			DC[i].block_no = 0;
 			DC[i].dirty = 0;

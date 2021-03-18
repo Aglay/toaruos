@@ -1,24 +1,19 @@
 /* vim: tabstop=4 shiftwidth=4 noexpandtab
  * This file is part of ToaruOS and is released under the terms
  * of the NCSA / University of Illinois License - see LICENSE.md
- * Copyright (C) 2012-2014 Kevin Lange
+ * Copyright (C) 2012-2018 K. Lange
  *
  * Buffered Pipe
  *
  */
 
-#include <system.h>
-#include <fs.h>
-#include <printf.h>
-#include <pipe.h>
-#include <logging.h>
+#include <kernel/system.h>
+#include <kernel/fs.h>
+#include <kernel/printf.h>
+#include <kernel/pipe.h>
+#include <kernel/logging.h>
 
 #define DEBUG_PIPES 0
-
-uint32_t read_pipe(fs_node_t *node, uint32_t offset, uint32_t size, uint8_t *buffer);
-uint32_t write_pipe(fs_node_t *node, uint32_t offset, uint32_t size, uint8_t *buffer);
-void open_pipe(fs_node_t *node, unsigned int flags);
-void close_pipe(fs_node_t *node);
 
 static inline size_t pipe_unread(pipe_device_t * pipe) {
 	if (pipe->read_ptr == pipe->write_ptr) {
@@ -82,7 +77,7 @@ static void pipe_alert_waiters(pipe_device_t * pipe) {
 	}
 }
 
-uint32_t read_pipe(fs_node_t *node, uint32_t offset, uint32_t size, uint8_t *buffer) {
+uint32_t read_pipe(fs_node_t *node, uint64_t offset, uint32_t size, uint8_t *buffer) {
 	assert(node->device != 0 && "Attempted to read from a fully-closed pipe.");
 
 	/* Retreive the pipe object associated with this file node */
@@ -102,7 +97,7 @@ uint32_t read_pipe(fs_node_t *node, uint32_t offset, uint32_t size, uint8_t *buf
 
 	if (pipe->dead) {
 		debug_print(WARNING, "Pipe is dead?");
-		send_signal(getpid(), SIGPIPE);
+		send_signal(getpid(), SIGPIPE, 1);
 		return 0;
 	}
 
@@ -125,7 +120,7 @@ uint32_t read_pipe(fs_node_t *node, uint32_t offset, uint32_t size, uint8_t *buf
 	return collected;
 }
 
-uint32_t write_pipe(fs_node_t *node, uint32_t offset, uint32_t size, uint8_t *buffer) {
+uint32_t write_pipe(fs_node_t *node, uint64_t offset, uint32_t size, uint8_t *buffer) {
 	assert(node->device != 0 && "Attempted to write to a fully-closed pipe.");
 
 	/* Retreive the pipe object associated with this file node */
@@ -146,7 +141,7 @@ uint32_t write_pipe(fs_node_t *node, uint32_t offset, uint32_t size, uint8_t *bu
 
 	if (pipe->dead) {
 		debug_print(WARNING, "Pipe is dead?");
-		send_signal(getpid(), SIGPIPE);
+		send_signal(getpid(), SIGPIPE, 1);
 		return 0;
 	}
 
