@@ -1,21 +1,20 @@
 /* vim: tabstop=4 shiftwidth=4 noexpandtab
  * This file is part of ToaruOS and is released under the terms
  * of the NCSA / University of Illinois License - see LICENSE.md
- * Copyright (C) 2011-2018 K. Lange
+ * Copyright (C) 2011-2014 Kevin Lange
  * Copyright (C) 2014 Lioncash
  * Copyright (C) 2012 Tianyi Wang
  *
  * Virtual File System
  *
  */
-#include <kernel/system.h>
-#include <kernel/fs.h>
-#include <kernel/printf.h>
-#include <kernel/process.h>
-#include <kernel/logging.h>
-
-#include <toaru/list.h>
-#include <toaru/hashmap.h>
+#include <system.h>
+#include <fs.h>
+#include <printf.h>
+#include <list.h>
+#include <process.h>
+#include <logging.h>
+#include <hashmap.h>
 
 #define MAX_SYMLINK_DEPTH 8
 #define MAX_SYMLINK_SIZE 4096
@@ -29,7 +28,7 @@ hashmap_t * fs_types = NULL;
 int has_permission(fs_node_t * node, int permission_bit) {
 	if (!node) return 0;
 
-	if (current_process->user == 0 && permission_bit != 01) { /* even root needs exec to exec */
+	if (current_process->user == 0) {
 		return 1;
 	}
 
@@ -88,12 +87,9 @@ static struct dirent * readdir_mapper(fs_node_t *node, uint32_t index) {
 static fs_node_t * vfs_mapper(void) {
 	fs_node_t * fnode = malloc(sizeof(fs_node_t));
 	memset(fnode, 0x00, sizeof(fs_node_t));
-	fnode->mask = 0555;
+	fnode->mask = 0666;
 	fnode->flags   = FS_DIRECTORY;
 	fnode->readdir = readdir_mapper;
-	fnode->ctime   = now();
-	fnode->mtime   = now();
-	fnode->atime   = now();
 	return fnode;
 }
 
@@ -101,26 +97,26 @@ static fs_node_t * vfs_mapper(void) {
  * selectcheck_fs: Check if a read from this file would block.
  */
 int selectcheck_fs(fs_node_t * node) {
-	if (!node) return -ENOENT;
+	if (!node) return -1;
 
 	if (node->selectcheck) {
 		return node->selectcheck(node);
 	}
 
-	return -EINVAL;
+	return -1;
 }
 
 /**
  * selectwait_fs: Inform a node that it should alert the current_process.
  */
 int selectwait_fs(fs_node_t * node, void * process) {
-	if (!node) return -ENOENT;
+	if (!node) return -1;
 
 	if (node->selectwait) {
 		return node->selectwait(node, process);
 	}
 
-	return -EINVAL;
+	return -1;
 }
 
 /**
@@ -132,14 +128,14 @@ int selectwait_fs(fs_node_t * node, void * process) {
  * @param buffer  A buffer to copy of the read data into
  * @returns Bytes read
  */
-uint32_t read_fs(fs_node_t *node, uint64_t offset, uint32_t size, uint8_t *buffer) {
-	if (!node) return -ENOENT;
+uint32_t read_fs(fs_node_t *node, uint32_t offset, uint32_t size, uint8_t *buffer) {
+	if (!node) return -1;
 
 	if (node->read) {
 		uint32_t ret = node->read(node, offset, size, buffer);
 		return ret;
 	} else {
-		return -EINVAL;
+		return -1;
 	}
 }
 
@@ -152,27 +148,14 @@ uint32_t read_fs(fs_node_t *node, uint64_t offset, uint32_t size, uint8_t *buffe
  * @param buffer  A buffer to copy from
  * @returns Bytes written
  */
-uint32_t write_fs(fs_node_t *node, uint64_t offset, uint32_t size, uint8_t *buffer) {
-	if (!node) return -ENOENT;
+uint32_t write_fs(fs_node_t *node, uint32_t offset, uint32_t size, uint8_t *buffer) {
+	if (!node) return -1;
 
 	if (node->write) {
 		uint32_t ret = node->write(node, offset, size, buffer);
 		return ret;
 	} else {
-		return -EROFS;
-	}
-}
-
-/**
- * truncate_fs: set the size of a file to 9
- *
- * @param node File to resize
- */
-void truncate_fs(fs_node_t * node) {
-	if (!node) return;
-
-	if (node->truncate) {
-		node->truncate(node);
+		return -1;
 	}
 }
 
@@ -246,16 +229,6 @@ int chmod_fs(fs_node_t *node, int mode) {
 }
 
 /**
- * chown_fs
- */
-int chown_fs(fs_node_t *node, int uid, int gid) {
-	if (node->chown) {
-		return node->chown(node, uid, gid);
-	}
-	return 0;
-}
-
-/**
  * readdir_fs: Read a directory for the requested index
  *
  * @param node  Directory to read
@@ -302,12 +275,12 @@ fs_node_t *finddir_fs(fs_node_t *node, char *name) {
  * @returns Depends on `request`
  */
 int ioctl_fs(fs_node_t *node, int request, void * argp) {
-	if (!node) return -ENOENT;
+	if (!node) return -1;
 
 	if (node->ioctl) {
 		return node->ioctl(node, request, argp);
 	} else {
-		return -EINVAL;
+		return -1; /* TODO Should actually be ENOTTY, but we're bad at error numbers */
 	}
 }
 
@@ -340,7 +313,7 @@ int create_file_fs(char *name, uint16_t permission) {
 		f_path++;
 	}
 
-	debug_print(NOTICE, "creating file %s within %s (hope these strings are good)", f_path, parent_path);
+	debug_print(WARNING, "creating file %s within %s (hope these strings are good)", f_path, parent_path);
 
 	parent = kopen(parent_path, 0);
 	free(parent_path);
@@ -348,7 +321,7 @@ int create_file_fs(char *name, uint16_t permission) {
 	if (!parent) {
 		debug_print(WARNING, "failed to open parent");
 		free(path);
-		return -ENOENT;
+		return -1;
 	}
 
 	if (!has_permission(parent, 02)) {
@@ -356,17 +329,14 @@ int create_file_fs(char *name, uint16_t permission) {
 		return -EACCES;
 	}
 
-	int ret = 0;
 	if (parent->create) {
-		ret = parent->create(parent, f_path, permission);
-	} else {
-		ret = -EINVAL;
+		parent->create(parent, f_path, permission);
 	}
 
 	free(path);
 	free(parent);
 
-	return ret;
+	return 0;
 }
 
 int unlink_fs(char * name) {
@@ -397,25 +367,17 @@ int unlink_fs(char * name) {
 
 	if (!parent) {
 		free(path);
-		return -ENOENT;
+		return -1;
 	}
 
-	if (!has_permission(parent, 02)) {
-		free(path);
-		close_fs(parent);
-		return -EACCES;
-	}
-
-	int ret = 0;
 	if (parent->unlink) {
-		ret = parent->unlink(parent, f_path);
-	} else {
-		ret = -EINVAL;
+		parent->unlink(parent, f_path);
 	}
 
 	free(path);
-	close_fs(parent);
-	return ret;
+	free(parent);
+
+	return 0;
 }
 
 int mkdir_fs(char *name, uint16_t permission) {
@@ -423,12 +385,15 @@ int mkdir_fs(char *name, uint16_t permission) {
 	char *cwd = (char *)(current_process->wd_name);
 	char *path = canonicalize_path(cwd, name);
 
-	if (!name || !strlen(name)) {
-		return -EINVAL;
-	}
-
 	char * parent_path = malloc(strlen(path) + 4);
 	sprintf(parent_path, "%s/..", path);
+
+	fs_node_t * this = kopen(path, 0);
+	int _exists = 0;
+	if (this) {
+		debug_print(WARNING, "Tried to mkdir a dir that already exists? (%s)", path);
+		_exists = 1;
+	}
 
 	char * f_path = path + strlen(path) - 1;
 	while (f_path > path) {
@@ -450,38 +415,23 @@ int mkdir_fs(char *name, uint16_t permission) {
 
 	if (!parent) {
 		free(path);
-		return -ENOENT;
+		if (_exists) {
+			return -EEXIST;
+		}
+		return -1;
 	}
 
-	if (!f_path || !strlen(f_path)) {
-		/* Odd edge case with / */
-		return -EEXIST;
-	}
-
-	fs_node_t * this = kopen(path, 0);
-	int _exists = 0;
-	if (this) { /* We need to do this because permission check stuff... */
-		close_fs(this);
-		_exists = 1;
-	}
-
-	if (!has_permission(parent, 02)) {
-		free(path);
-		close_fs(parent);
-		return _exists ? -EEXIST : -EACCES;
-	}
-
-	int ret = 0;
 	if (parent->mkdir) {
-		ret = parent->mkdir(parent, f_path, permission);
-	} else {
-		ret = -EROFS;
+		parent->mkdir(parent, f_path, permission);
 	}
 
 	free(path);
 	close_fs(parent);
 
-	return ret;
+	if (_exists) {
+		return -EEXIST;
+	}
+	return 0;
 }
 
 fs_node_t *clone_fs(fs_node_t *source) {
@@ -520,29 +470,26 @@ int symlink_fs(char * target, char * name) {
 
 	if (!parent) {
 		free(path);
-		return -ENOENT;
+		return -1;
 	}
 
-	int ret = 0;
 	if (parent->symlink) {
-		ret = parent->symlink(parent, target, f_path);
-	} else {
-		ret = -EINVAL;
+		parent->symlink(parent, target, f_path);
 	}
 
 	free(path);
 	close_fs(parent);
 
-	return ret;
+	return 0;
 }
 
 int readlink_fs(fs_node_t *node, char * buf, uint32_t size) {
-	if (!node) return -ENOENT;
+	if (!node) return -1;
 
 	if (node->readlink) {
 		return node->readlink(node, buf, size);
 	} else {
-		return -EINVAL;
+		return -1;
 	}
 }
 
@@ -970,14 +917,30 @@ fs_node_t *kopen_recur(char *filename, uint32_t flags, uint32_t symlink_depth, c
 
 	if (!node_ptr) return NULL;
 
-	do {
+	if (path_offset >= path+path_len) {
+		free(path);
+		open_fs(node_ptr, flags);
+		return node_ptr;
+	}
+	fs_node_t *node_next = NULL;
+	for (; depth < path_depth; ++depth) {
+		/* Search the active directory for the requested directory */
+		debug_print(INFO, "... Searching for %s", path_offset);
+		node_next = finddir_fs(node_ptr, path_offset);
+		free(node_ptr); /* Always a clone or an unopened thing */
+		node_ptr = node_next;
+		if (!node_ptr) {
+			/* We failed to find the requested directory */
+			free((void *)path);
+			return NULL;
+		}
 		/* 
 		 * This test is a little complicated, but we basically always resolve symlinks in the
 		 * of a path (like /home/symlink/file) even if O_NOFOLLOW and O_PATH are set. If we are
 		 * on the leaf of the path then we will look at those flags and act accordingly
 		 */
 		if ((node_ptr->flags & FS_SYMLINK) &&
-				!((flags & O_NOFOLLOW) && (flags & O_PATH) && depth == path_depth)) {
+				!((flags & O_NOFOLLOW) && (flags & O_PATH) && depth == path_depth - 1)) {
 			/* This ensures we don't return a path when NOFOLLOW is requested but PATH
 			 * isn't passed.
 			 */
@@ -1021,7 +984,7 @@ fs_node_t *kopen_recur(char *filename, uint32_t flags, uint32_t symlink_depth, c
 			char * relpath = malloc(path_len + 1);
 			char * ptr = relpath;
 			memcpy(relpath, path, path_len + 1);
-			for (unsigned int i = 0; depth && i < depth-1; i++) {
+			for (unsigned int i = 0; i < depth; i++) {
 				while(*ptr != '\0') {
 					ptr++;
 				}
@@ -1037,31 +1000,15 @@ fs_node_t *kopen_recur(char *filename, uint32_t flags, uint32_t symlink_depth, c
 				return NULL;
 			}
 		}
-		if (path_offset >= path+path_len) {
-			free(path);
-			open_fs(node_ptr, flags);
-			return node_ptr;
-		}
-		if (depth == path_depth) {
+		if (depth == path_depth - 1) {
 			/* We found the file and are done, open the node */
 			open_fs(node_ptr, flags);
 			free((void *)path);
 			return node_ptr;
 		}
 		/* We are still searching... */
-		debug_print(INFO, "... Searching for %s", path_offset);
-		fs_node_t * node_next = finddir_fs(node_ptr, path_offset);
-		free(node_ptr); /* Always a clone or an unopened thing */
-		node_ptr = node_next;
-		/* Search the active directory for the requested directory */
-		if (!node_ptr) {
-			/* We failed to find the requested directory */
-			free((void *)path);
-			return NULL;
-		}
 		path_offset += strlen(path_offset) + 1;
-		++depth;
-	} while (depth < path_depth + 1);
+	}
 	debug_print(INFO, "- Not found.");
 	/* We failed to find the requested file, but our loop terminated. */
 	free((void *)path);

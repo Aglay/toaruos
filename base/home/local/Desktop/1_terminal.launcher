@@ -1,3 +1,0 @@
-run=cd ~ ; exec terminal
-title=Terminal
-icon=utilities-terminal

@@ -1,3 +1,0 @@
-run=exec gsudo package-manager
-title=Packages
-icon=package

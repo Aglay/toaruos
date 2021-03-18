@@ -14,7 +14,6 @@ gdt_flush:
     mov %ax, %es
     mov %ax, %fs
     mov %ax, %ss
-    mov %ax, %gs
 
     ljmp $0x08, $.flush
 .flush:

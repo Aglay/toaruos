@@ -7,11 +7,8 @@
  *
  */
 
-#include <kernel/system.h>
-
-#ifndef UCHAR_MAX
-#define UCHAR_MAX 255
-#endif
+#include <system.h>
+#include <limits.h>
 
 #define ALIGN (sizeof(size_t))
 #define ONES ((size_t)-1/UCHAR_MAX)

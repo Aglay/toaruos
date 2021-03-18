@@ -1,7 +1,7 @@
 /* vim: tabstop=4 shiftwidth=4 noexpandtab
  * This file is part of ToaruOS and is released under the terms
  * of the NCSA / University of Illinois License - see LICENSE.md
- * Copyright (C) 2011-2018 K. Lange
+ * Copyright (C) 2011-2015 Kevin Lange
  *
  * Low-level keyboard interrupt driver.
  *
@@ -10,12 +10,13 @@
  *
  */
 
-#include <kernel/system.h>
-#include <kernel/logging.h>
-#include <kernel/fs.h>
-#include <kernel/pipe.h>
-#include <kernel/process.h>
-#include <kernel/module.h>
+#include <system.h>
+#include <logging.h>
+#include <fs.h>
+#include <pipe.h>
+#include <process.h>
+
+#include <module.h>
 
 #define KEY_DEVICE  0x60
 #define KEY_PENDING 0x64
@@ -54,13 +55,14 @@ static int keyboard_install(void) {
 
 	/* Create a device pipe */
 	keyboard_pipe = make_pipe(128);
+	current_process->fds->entries[0] = keyboard_pipe;
 
 	keyboard_pipe->flags = FS_CHARDEVICE;
 
 	vfs_mount("/dev/kbd", keyboard_pipe);
 
 	/* Install the interrupt handler */
-	irq_install_handler(KEY_IRQ, keyboard_handler, "ps2 kbd");
+	irq_install_handler(KEY_IRQ, keyboard_handler);
 
 	return 0;
 }

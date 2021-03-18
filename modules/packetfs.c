@@ -1,15 +1,14 @@
 /* vim: tabstop=4 shiftwidth=4 noexpandtab
  * This file is part of ToaruOS and is released under the terms
  * of the NCSA / University of Illinois License - see LICENSE.md
- * Copyright (C) 2014-2018 K. Lange
+ * Copyright (C) 2014 Kevin Lange
  */
-#include <kernel/system.h>
-#include <kernel/fs.h>
-#include <kernel/pipe.h>
-#include <kernel/module.h>
-#include <kernel/logging.h>
-
-#include <sys/ioctl.h>
+#include <system.h>
+#include <fs.h>
+#include <pipe.h>
+#include <module.h>
+#include <logging.h>
+#include <ioctl.h>
 
 #define MAX_PACKET_SIZE 1024
 
@@ -98,7 +97,7 @@ static pex_client_t * create_client(pex_ex_t * p) {
 	return out;
 }
 
-static uint32_t read_server(fs_node_t * node, uint64_t offset, uint32_t size, uint8_t * buffer) {
+static uint32_t read_server(fs_node_t * node, uint32_t offset, uint32_t size, uint8_t * buffer) {
 	pex_ex_t * p = (pex_ex_t *)node->device;
 	debug_print(INFO, "[pex] server read(...)");
 
@@ -119,7 +118,7 @@ static uint32_t read_server(fs_node_t * node, uint64_t offset, uint32_t size, ui
 	return out;
 }
 
-static uint32_t write_server(fs_node_t * node, uint64_t offset, uint32_t size, uint8_t * buffer) {
+static uint32_t write_server(fs_node_t * node, uint32_t offset, uint32_t size, uint8_t * buffer) {
 	pex_ex_t * p = (pex_ex_t *)node->device;
 	debug_print(INFO, "[pex] server write(...)");
 
@@ -158,7 +157,7 @@ static int ioctl_server(fs_node_t * node, int request, void * argp) {
 	}
 }
 
-static uint32_t read_client(fs_node_t * node, uint64_t offset, uint32_t size, uint8_t * buffer) {
+static uint32_t read_client(fs_node_t * node, uint32_t offset, uint32_t size, uint8_t * buffer) {
 	pex_client_t * c = (pex_client_t *)node->inode;
 	if (c->parent != node->device) {
 		debug_print(WARNING, "[pex] Invalid device endpoint on client read?");
@@ -185,7 +184,7 @@ static uint32_t read_client(fs_node_t * node, uint64_t offset, uint32_t size, ui
 	return out;
 }
 
-static uint32_t write_client(fs_node_t * node, uint64_t offset, uint32_t size, uint8_t * buffer) {
+static uint32_t write_client(fs_node_t * node, uint32_t offset, uint32_t size, uint8_t * buffer) {
 	pex_client_t * c = (pex_client_t *)node->inode;
 	if (c->parent != node->device) {
 		debug_print(WARNING, "[pex] Invalid device endpoint on client write?");
@@ -380,8 +379,8 @@ static fs_node_t * finddir_packetfs(fs_node_t * node, char * name) {
 	return NULL;
 }
 
-static int create_packetfs(fs_node_t *parent, char *name, uint16_t permission) {
-	if (!name) return -EINVAL;
+static void create_packetfs(fs_node_t *parent, char *name, uint16_t permission) {
+	if (!name) return;
 
 	pex_t * p = (pex_t *)parent->device;
 
@@ -394,7 +393,7 @@ static int create_packetfs(fs_node_t *parent, char *name, uint16_t permission) {
 		if (!strcmp(name, t->name)) {
 			spin_unlock(p->lock);
 			/* Already exists */
-			return -EEXIST;
+			return;
 		}
 	}
 
@@ -413,15 +412,14 @@ static int create_packetfs(fs_node_t *parent, char *name, uint16_t permission) {
 
 	spin_unlock(p->lock);
 
-	return 0;
 }
 
 static void destroy_pex(pex_ex_t * p) {
 	/* XXX */
 }
 
-static int unlink_packetfs(fs_node_t *parent, char *name) {
-	if (!name) return -EINVAL;
+static void unlink_packetfs(fs_node_t *parent, char *name) {
+	if (!name) return;
 
 	pex_t * p = (pex_t *)parent->device;
 
@@ -443,14 +441,9 @@ static int unlink_packetfs(fs_node_t *parent, char *name) {
 
 	if (i >= 0) {
 		list_remove(p->exchanges, i);
-	} else {
-		spin_unlock(p->lock);
-		return -ENOENT;
 	}
 
 	spin_unlock(p->lock);
-
-	return 0;
 }
 
 static fs_node_t * packetfs_manager(void) {

@@ -1,18 +1,17 @@
 /* vim: tabstop=4 shiftwidth=4 noexpandtab
  * This file is part of ToaruOS and is released under the terms
  * of the NCSA / University of Illinois License - see LICENSE.md
- * Copyright (C) 2011-2018 K. Lange
+ * Copyright (C) 2011-2014 Kevin Lange
  *
  * Kernel printf implementation
  *
  * Simple, painfully lacking, implementation of printf(),
  * for the kernel of all things.
  */
-#include <kernel/system.h>
-#include <kernel/process.h>
-#include <kernel/fs.h>
-
+#include <system.h>
+#include <process.h>
 #include <va_list.h>
+#include <fs.h>
 
 /*
  * Integer to string

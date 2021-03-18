@@ -1,17 +1,17 @@
 /* vim: tabstop=4 shiftwidth=4 noexpandtab
  * This file is part of ToaruOS and is released under the terms
  * of the NCSA / University of Illinois License - see LICENSE.md
- * Copyright (C) 2014-2018 K. Lange
+ * Copyright (C) 2014 Kevin Lange
  */
-#include <kernel/system.h>
-#include <kernel/logging.h>
-#include <kernel/fs.h>
-#include <kernel/version.h>
-#include <kernel/process.h>
-#include <kernel/mem.h>
-#include <kernel/module.h>
-#include <kernel/mod/tmpfs.h>
-#include <kernel/tokenize.h>
+#include <system.h>
+#include <logging.h>
+#include <fs.h>
+#include <version.h>
+#include <process.h>
+#include <mem.h>
+
+#include <module.h>
+#include <mod/tmpfs.h>
 
 /* 4KB */
 #define BLOCKSIZE 0x1000
@@ -54,7 +54,7 @@ static struct tmpfs_file * tmpfs_file_new(char * name) {
 	return t;
 }
 
-static int symlink_tmpfs(fs_node_t * parent, char * target, char * name) {
+static void symlink_tmpfs(fs_node_t * parent, char * target, char * name) {
 	struct tmpfs_dir * d = (struct tmpfs_dir *)parent->device;
 	debug_print(NOTICE, "Creating TMPFS file (symlink) %s in %s", name, d->name);
 
@@ -64,7 +64,7 @@ static int symlink_tmpfs(fs_node_t * parent, char * target, char * name) {
 		if (!strcmp(name, t->name)) {
 			spin_unlock(tmpfs_lock);
 			debug_print(WARNING, "... already exists.");
-			return -EEXIST; /* Already exists */
+			return; /* Already exists */
 		}
 	}
 	spin_unlock(tmpfs_lock);
@@ -75,15 +75,9 @@ static int symlink_tmpfs(fs_node_t * parent, char * target, char * name) {
 	debug_print(NOTICE, "symlink target is [%s]", target);
 	t->target = strdup(target);
 
-	t->mask = 0777;
-	t->uid = current_process->user;
-	t->gid = current_process->user;
-
 	spin_lock(tmpfs_lock);
 	list_insert(d->files, t);
 	spin_unlock(tmpfs_lock);
-
-	return 0;
 }
 
 static int readlink_tmpfs(fs_node_t * node, char * buf, size_t size) {
@@ -94,12 +88,12 @@ static int readlink_tmpfs(fs_node_t * node, char * buf, size_t size) {
 	}
 
 	if (size < strlen(t->target) + 1) {
-		debug_print(INFO, "Requested read size was only %d, need %d.", size, strlen(t->target)+1);
-		memcpy(buf, t->target, size-1);
-		buf[size-1] = '\0';
-		return size-2;
+		debug_print(WARNING, "Requested read size was only %d, need %d.", size, strlen(t->target)+1);
+		memcpy(buf, t->target, size);
+		buf[size] = '\0';
+		return size-1;
 	} else {
-		debug_print(INFO, "Reading link target is [%s]", t->target);
+		debug_print(WARNING, "Reading link target is [%s]", t->target);
 		memcpy(buf, t->target, strlen(t->target) + 1);
 		return strlen(t->target);
 	}
@@ -176,7 +170,7 @@ static char * tmpfs_file_getset_block(struct tmpfs_file * t, size_t blockid, int
 }
 
 
-static uint32_t read_tmpfs(fs_node_t *node, uint64_t offset, uint32_t size, uint8_t *buffer) {
+static uint32_t read_tmpfs(fs_node_t *node, uint32_t offset, uint32_t size, uint8_t *buffer) {
 	struct tmpfs_file * t = (struct tmpfs_file *)(node->device);
 
 	t->atime = now();
@@ -195,7 +189,7 @@ static uint32_t read_tmpfs(fs_node_t *node, uint64_t offset, uint32_t size, uint
 	if (start_block == end_block && offset == end) return 0;
 	if (start_block == end_block) {
 		void *buf = tmpfs_file_getset_block(t, start_block, 0);
-		memcpy(buffer, (uint8_t *)(((uint32_t)buf) + ((uintptr_t)offset % BLOCKSIZE)), size_to_read);
+		memcpy(buffer, (uint8_t *)(((uint32_t)buf) + (offset % BLOCKSIZE)), size_to_read);
 		spin_unlock(tmpfs_page_lock);
 		return size_to_read;
 	} else {
@@ -204,7 +198,7 @@ static uint32_t read_tmpfs(fs_node_t *node, uint64_t offset, uint32_t size, uint
 		for (block_offset = start_block; block_offset < end_block; block_offset++, blocks_read++) {
 			if (block_offset == start_block) {
 				void *buf = tmpfs_file_getset_block(t, block_offset, 0);
-				memcpy(buffer, (uint8_t *)(((uint32_t)buf) + ((uintptr_t)offset % BLOCKSIZE)), BLOCKSIZE - (offset % BLOCKSIZE));
+				memcpy(buffer, (uint8_t *)(((uint32_t)buf) + (offset % BLOCKSIZE)), BLOCKSIZE - (offset % BLOCKSIZE));
 				spin_unlock(tmpfs_page_lock);
 			} else {
 				void *buf = tmpfs_file_getset_block(t, block_offset, 0);
@@ -221,7 +215,7 @@ static uint32_t read_tmpfs(fs_node_t *node, uint64_t offset, uint32_t size, uint
 	return size_to_read;
 }
 
-static uint32_t write_tmpfs(fs_node_t *node, uint64_t offset, uint32_t size, uint8_t *buffer) {
+static uint32_t write_tmpfs(fs_node_t *node, uint32_t offset, uint32_t size, uint8_t *buffer) {
 	struct tmpfs_file * t = (struct tmpfs_file *)(node->device);
 
 	t->atime = now();
@@ -238,7 +232,7 @@ static uint32_t write_tmpfs(fs_node_t *node, uint64_t offset, uint32_t size, uin
 	uint32_t size_to_read = end - offset;
 	if (start_block == end_block) {
 		void *buf = tmpfs_file_getset_block(t, start_block, 1);
-		memcpy((uint8_t *)(((uint32_t)buf) + ((uintptr_t)offset % BLOCKSIZE)), buffer, size_to_read);
+		memcpy((uint8_t *)(((uint32_t)buf) + (offset % BLOCKSIZE)), buffer, size_to_read);
 		spin_unlock(tmpfs_page_lock);
 		return size_to_read;
 	} else {
@@ -247,7 +241,7 @@ static uint32_t write_tmpfs(fs_node_t *node, uint64_t offset, uint32_t size, uin
 		for (block_offset = start_block; block_offset < end_block; block_offset++, blocks_read++) {
 			if (block_offset == start_block) {
 				void *buf = tmpfs_file_getset_block(t, block_offset, 1);
-				memcpy((uint8_t *)(((uint32_t)buf) + ((uintptr_t)offset % BLOCKSIZE)), buffer, BLOCKSIZE - (offset % BLOCKSIZE));
+				memcpy((uint8_t *)(((uint32_t)buf) + (offset % BLOCKSIZE)), buffer, BLOCKSIZE - (offset % BLOCKSIZE));
 				spin_unlock(tmpfs_page_lock);
 			} else {
 				void *buf = tmpfs_file_getset_block(t, block_offset, 1);
@@ -273,34 +267,22 @@ static int chmod_tmpfs(fs_node_t * node, int mode) {
 	return 0;
 }
 
-static int chown_tmpfs(fs_node_t * node, int uid, int gid) {
-	struct tmpfs_file * t = (struct tmpfs_file *)(node->device);
-
-	debug_print(INFO, "chown(..., %d, %d)", uid, gid);
-
-	t->uid = uid;
-	t->gid = gid;
-
-	return 0;
-}
-
-static void truncate_tmpfs(fs_node_t * node) {
-	struct tmpfs_file * t = (struct tmpfs_file *)(node->device);
-	debug_print(INFO, "Truncating file %s", t->name);
-	for (size_t i = 0; i < t->block_count; ++i) {
-		clear_frame((uintptr_t)t->blocks[i] * 0x1000);
-		t->blocks[i] = 0;
-	}
-	t->block_count = 0;
-	t->length = 0;
-	t->mtime = node->atime;
-}
-
 static void open_tmpfs(fs_node_t * node, unsigned int flags) {
 	struct tmpfs_file * t = (struct tmpfs_file *)(node->device);
-	debug_print(INFO, "---- Opened TMPFS file %s with flags 0x%x ----", t->name, flags);
 
-	t->atime = now();
+	debug_print(WARNING, "---- Opened TMPFS file %s with flags 0x%x ----", t->name, flags);
+
+	if (flags & O_TRUNC) {
+		debug_print(WARNING, "Truncating file %s", t->name);
+		for (size_t i = 0; i < t->block_count; ++i) {
+			clear_frame((uintptr_t)t->blocks[i] * 0x1000);
+			t->blocks[i] = 0;
+		}
+		t->block_count = 0;
+		t->length = 0;
+	}
+
+	return;
 }
 
 static fs_node_t * tmpfs_from_file(struct tmpfs_file * t) {
@@ -323,9 +305,7 @@ static fs_node_t * tmpfs_from_file(struct tmpfs_file * t) {
 	fnode->readdir = NULL;
 	fnode->finddir = NULL;
 	fnode->chmod   = chmod_tmpfs;
-	fnode->chown   = chown_tmpfs;
 	fnode->length  = t->length;
-	fnode->truncate = truncate_tmpfs;
 	fnode->nlink   = 1;
 	return fnode;
 }
@@ -412,7 +392,7 @@ static fs_node_t * finddir_tmpfs(fs_node_t * node, char * name) {
 	return NULL;
 }
 
-static int unlink_tmpfs(fs_node_t * node, char * name) {
+static void unlink_tmpfs(fs_node_t * node, char * name) {
 	struct tmpfs_dir * d = (struct tmpfs_dir *)node->device;
 	int i = -1, j = 0;
 	spin_lock(tmpfs_lock);
@@ -430,17 +410,14 @@ static int unlink_tmpfs(fs_node_t * node, char * name) {
 
 	if (i >= 0) {
 		list_remove(d->files, i);
-	} else {
-		spin_unlock(tmpfs_lock);
-		return -ENOENT;
 	}
 
 	spin_unlock(tmpfs_lock);
-	return 0;
+	return;
 }
 
-static int create_tmpfs(fs_node_t *parent, char *name, uint16_t permission) {
-	if (!name) return -EINVAL;
+static void create_tmpfs(fs_node_t *parent, char *name, uint16_t permission) {
+	if (!name) return;
 
 	struct tmpfs_dir * d = (struct tmpfs_dir *)parent->device;
 	debug_print(NOTICE, "Creating TMPFS file %s in %s", name, d->name);
@@ -451,7 +428,7 @@ static int create_tmpfs(fs_node_t *parent, char *name, uint16_t permission) {
 		if (!strcmp(name, t->name)) {
 			spin_unlock(tmpfs_lock);
 			debug_print(WARNING, "... already exists.");
-			return -EEXIST; /* Already exists */
+			return; /* Already exists */
 		}
 	}
 	spin_unlock(tmpfs_lock);
@@ -465,13 +442,10 @@ static int create_tmpfs(fs_node_t *parent, char *name, uint16_t permission) {
 	spin_lock(tmpfs_lock);
 	list_insert(d->files, t);
 	spin_unlock(tmpfs_lock);
-
-	return 0;
 }
 
-static int mkdir_tmpfs(fs_node_t * parent, char * name, uint16_t permission) {
-	if (!name) return -EINVAL;
-	if (!strlen(name)) return -EINVAL;
+static void mkdir_tmpfs(fs_node_t * parent, char * name, uint16_t permission) {
+	if (!name) return;
 
 	struct tmpfs_dir * d = (struct tmpfs_dir *)parent->device;
 	debug_print(NOTICE, "Creating TMPFS directory %s (in %s)", name, d->name);
@@ -482,7 +456,7 @@ static int mkdir_tmpfs(fs_node_t * parent, char * name, uint16_t permission) {
 		if (!strcmp(name, t->name)) {
 			spin_unlock(tmpfs_lock);
 			debug_print(WARNING, "... already exists.");
-			return -EEXIST; /* Already exists */
+			return; /* Already exists */
 		}
 	}
 	spin_unlock(tmpfs_lock);
@@ -496,8 +470,6 @@ static int mkdir_tmpfs(fs_node_t * parent, char * name, uint16_t permission) {
 	spin_lock(tmpfs_lock);
 	list_insert(d->files, out);
 	spin_unlock(tmpfs_lock);
-
-	return 0;
 }
 
 static fs_node_t * tmpfs_from_dir(struct tmpfs_dir * d) {
@@ -525,9 +497,6 @@ static fs_node_t * tmpfs_from_dir(struct tmpfs_dir * d) {
 	fnode->nlink   = 1; /* should be "number of children that are directories + 1" */
 	fnode->symlink = symlink_tmpfs;
 
-	fnode->chown   = chown_tmpfs;
-	fnode->chmod   = chmod_tmpfs;
-
 	return fnode;
 }
 
@@ -541,30 +510,16 @@ fs_node_t * tmpfs_create(char * name) {
 }
 
 fs_node_t * tmpfs_mount(char * device, char * mount_path) {
-	char * arg = strdup(device);
-	char * argv[10];
-	int argc = tokenize(arg, ",", argv);
-
-	fs_node_t * fs = tmpfs_create(argv[0]);
-
-	if (argc > 1) {
-		if (strlen(argv[1]) < 3) {
-			debug_print(WARNING, "ignoring bad permission option for tmpfs");
-		} else {
-			int mode = ((argv[1][0] - '0') << 6) |
-			           ((argv[1][1] - '0') << 3) |
-			           ((argv[1][2] - '0') << 0);
-			fs->mask = mode;
-		}
-	}
-
-	free(arg);
+	fs_node_t * fs = tmpfs_create(device);
 	return fs;
 }
 
 static int tmpfs_initialize(void) {
 
 	buf_space = (void*)kvmalloc(BLOCKSIZE);
+
+	vfs_mount("/tmp", tmpfs_create("tmp"));
+	vfs_mount("/var", tmpfs_create("var"));
 
 	vfs_register("tmpfs", tmpfs_mount);
 

@@ -1,14 +1,14 @@
 /* vim: tabstop=4 shiftwidth=4 noexpandtab
  * This file is part of ToaruOS and is released under the terms
  * of the NCSA / University of Illinois License - see LICENSE.md
- * Copyright (C) 2011-2018 K. Lange
+ * Copyright (C) 2011-2014 Kevin Lange
  *
  * Panic functions
  */
-#include <kernel/system.h>
-#include <kernel/logging.h>
-#include <kernel/printf.h>
-#include <kernel/module.h>
+#include <system.h>
+#include <logging.h>
+#include <printf.h>
+#include <module.h>
 
 void halt_and_catch_fire(char * error_message, const char * file, int line, struct regs * regs) {
 	IRQ_OFF;
@@ -26,7 +26,8 @@ void halt_and_catch_fire(char * error_message, const char * file, int line, stru
 		debug_print(ERROR, "User ESP:   0x%x",  regs->useresp);
 		debug_print(ERROR, "eip=0x%x",          regs->eip);
 	}
-	send_signal(current_process->id, SIGILL, 1);
+	debug_print(ERROR, "This process has been descheduled.");
+	kexit(1);
 }
 
 char * probable_function_name(uintptr_t ip, uintptr_t * out_addr) {

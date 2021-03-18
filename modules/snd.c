@@ -11,20 +11,20 @@
  * really support multiple devices despite the interface suggesting it might...
  */
 
-#include <kernel/module.h>
-#include <kernel/ringbuffer.h>
-#include <kernel/system.h>
-#include <kernel/mod/snd.h>
+#include <mod/snd.h>
 
-#include <toaru/list.h>
-#include <errno.h>
+#include <errno_defs.h>
+#include <list.h>
+#include <module.h>
+#include <ringbuffer.h>
+#include <system.h>
 
 /* Utility macros */
 #define N_ELEMENTS(arr) (sizeof(arr) / sizeof((arr)[0]))
 
 #define SND_BUF_SIZE 0x4000
 
-static uint32_t snd_dsp_write(fs_node_t * node, uint64_t offset, uint32_t size, uint8_t *buffer);
+static uint32_t snd_dsp_write(fs_node_t * node, uint32_t offset, uint32_t size, uint8_t *buffer);
 static int snd_dsp_ioctl(fs_node_t * node, int request, void * argp);
 static void snd_dsp_open(fs_node_t * node, unsigned int flags);
 static void snd_dsp_close(fs_node_t * node);
@@ -102,7 +102,7 @@ snd_unregister_cleanup:
 	return rv;
 }
 
-static uint32_t snd_dsp_write(fs_node_t * node, uint64_t offset, uint32_t size, uint8_t *buffer) {
+static uint32_t snd_dsp_write(fs_node_t * node, uint32_t offset, uint32_t size, uint8_t *buffer) {
 	if (!_devices.length) return -1; /* No sink available. */
 
 	struct dsp_node * dsp = node->device;

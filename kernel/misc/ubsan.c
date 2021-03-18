@@ -1,13 +1,12 @@
-#include <kernel/system.h>
-#include <kernel/types.h>
-#include <kernel/fs.h>
-#include <kernel/printf.h>
-#include <kernel/ubsan.h>
-
+#include <system.h>
+#include <types.h>
 #include <va_list.h>
+#include <fs.h>
+#include <printf.h>
+#include <ubsan.h>
 
 #define EARLY_LOG_DEVICE 0x3F8
-static uint32_t _ubsan_log_write(fs_node_t *node, uint64_t offset, uint32_t size, uint8_t *buffer) {
+static uint32_t _ubsan_log_write(fs_node_t *node, uint32_t offset, uint32_t size, uint8_t *buffer) {
 	for (unsigned int i = 0; i < size; ++i) {
 		outportb(EARLY_LOG_DEVICE, buffer[i]);
 	}
@@ -30,7 +29,6 @@ void __ubsan_handle_sub_overflow(struct OverflowData * data, unsigned long lhs, 
 }
 
 void __ubsan_handle_mul_overflow(struct OverflowData * data, unsigned long lhs, unsigned long rhs) {
-	ubsan_debug(&data->location);
 	fprintf(&_ubsan_log, "Overflow in mul: %d %d\n", lhs, rhs);
 }
 
@@ -62,7 +60,7 @@ void __ubsan_handle_shift_out_of_bounds(struct ShiftOutOfBoundsData * data, unsi
 #define IS_ALIGNED(a, b) (((a) & ((__typeof__(a))(b)-1)) == 0)
 
 void __ubsan_handle_type_mismatch(struct TypeMismatchData * data, unsigned long ptr) {
-	return; /* Unaligned reads are valid on x86, and we have some very ugly code where this goes poorly. */
+	return;
 	ubsan_debug(&data->location);
 	if (data->alignment && !IS_ALIGNED(ptr, data->alignment)) {
 		fprintf(&_ubsan_log, "bad alignment in read at 0x%x (wanted %d)\n", ptr, data->alignment);

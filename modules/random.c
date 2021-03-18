@@ -1,27 +1,34 @@
 /* vim: tabstop=4 shiftwidth=4 noexpandtab
  * This file is part of ToaruOS and is released under the terms
  * of the NCSA / University of Illinois License - see LICENSE.md
- * Copyright (C) 2014-2018 K. Lange
+ * Copyright (C) 2014 Kevin Lange
  *
  * Provides access to the kernel RNG
  *
  */
 
-#include <kernel/system.h>
-#include <kernel/logging.h>
-#include <kernel/fs.h>
-#include <kernel/module.h>
+#include <system.h>
+#include <logging.h>
+#include <fs.h>
 
-static uint32_t read_random(fs_node_t *node, uint64_t offset, uint32_t size, uint8_t *buffer) {
+#include <module.h>
+
+static uint32_t read_random(fs_node_t *node, uint32_t offset, uint32_t size, uint8_t *buffer);
+static uint32_t write_random(fs_node_t *node, uint32_t offset, uint32_t size, uint8_t *buffer);
+static void open_random(fs_node_t *node, unsigned int flags);
+static void close_random(fs_node_t *node);
+
+static uint32_t read_random(fs_node_t *node, uint32_t offset, uint32_t size, uint8_t *buffer) {
 	uint32_t s = 0;
 	while (s < size) {
 		buffer[s] = krand() % 0xFF;
+		offset++;
 		s++;
 	}
 	return size;
 }
 
-static uint32_t write_random(fs_node_t *node, uint64_t offset, uint32_t size, uint8_t *buffer) {
+static uint32_t write_random(fs_node_t *node, uint32_t offset, uint32_t size, uint8_t *buffer) {
 	return size;
 }
 

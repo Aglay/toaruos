@@ -1,7 +1,7 @@
 /* vim: tabstop=4 shiftwidth=4 noexpandtab
  * This file is part of ToaruOS and is released under the terms
  * of the NCSA / University of Illinois License - see LICENSE.md
- * Copyright (C) 2011-2018 K. Lange
+ * Copyright (C) 2011-2014 Kevin Lange
  * Copyright (C) 2012 Markus Schober
  * Copyright (C) 2015 Dale Weiler
  *
@@ -10,17 +10,14 @@
  * Internal format format for a process and functions to spawn
  * new processes and manage the process tree.
  */
-#include <kernel/system.h>
-#include <kernel/process.h>
-#include <kernel/bitset.h>
-#include <kernel/logging.h>
-#include <kernel/shm.h>
-#include <kernel/printf.h>
-
-#include <sys/wait.h>
-
-#include <toaru/list.h>
-#include <toaru/tree.h>
+#include <system.h>
+#include <process.h>
+#include <tree.h>
+#include <list.h>
+#include <bitset.h>
+#include <logging.h>
+#include <shm.h>
+#include <printf.h>
 
 tree_t * process_tree;  /* Parent->Children tree */
 list_t * process_list;  /* Flat storage */
@@ -265,22 +262,18 @@ process_t * spawn_init(void) {
 	 * of the process' entry in the process tree. */
 	init->tree_entry = process_tree->root;
 	init->id      = 1;       /* Init is PID 1 */
-	init->group   = 0; /* thread group id (real PID) */
-	init->job     = 1; /* process group id (jobs) */
-	init->session = 1; /* session leader id */
+	init->group   = 0;
 	init->name    = strdup("init");  /* Um, duh. */
 	init->cmdline = NULL;
 	init->user    = 0;       /* UID 0 */
-	init->real_user = 0;
 	init->mask    = 022;     /* umask */
+	init->group   = 0;       /* Task group 0 */
 	init->status  = 0;       /* Run status */
 	init->fds = malloc(sizeof(fd_table_t));
 	init->fds->refs = 1;
 	init->fds->length   = 0;  /* Initialize the file descriptors */
 	init->fds->capacity = 4;
 	init->fds->entries  = malloc(sizeof(fs_node_t *) * init->fds->capacity);
-	init->fds->modes    = malloc(sizeof(int) * init->fds->capacity);
-	init->fds->offsets  = malloc(sizeof(uint64_t) * init->fds->capacity);
 
 	/* Set the working directory */
 	init->wd_node = clone_fs(fs_root);
@@ -299,7 +292,6 @@ process_t * spawn_init(void) {
 
 	/* Process is not finished */
 	init->finished = 0;
-	init->suspended = 0;
 	init->started = 1;
 	init->running = 1;
 	init->wait_queue = list_create();
@@ -380,8 +372,7 @@ process_t * spawn_process(volatile process_t * parent, int reuse_fds) {
 
 	/* Allocate a new process */
 	debug_print(INFO,"   process_t {");
-	process_t * proc = malloc(sizeof(process_t));
-	memset(proc, 0, sizeof(process_t));
+	process_t * proc = calloc(sizeof(process_t),1);
 	debug_print(INFO,"   }");
 	proc->id = get_next_pid(); /* Set its PID */
 	proc->group = proc->id;    /* Set the GID */
@@ -391,12 +382,10 @@ process_t * spawn_process(volatile process_t * parent, int reuse_fds) {
 
 	/* Copy permissions */
 	proc->user  = parent->user;
-	proc->real_user = parent->real_user;
 	proc->mask = parent->mask;
 
-	/* Until specified otherwise */
-	proc->job = parent->job;
-	proc->session = parent->session;
+	/* XXX this is wrong? */
+	proc->group = parent->group;
 
 	/* Zero out the ESP/EBP/EIP */
 	proc->thread.esp = 0;
@@ -431,14 +420,10 @@ process_t * spawn_process(volatile process_t * parent, int reuse_fds) {
 		proc->fds->capacity = parent->fds->capacity;
 		debug_print(INFO,"    fds / files {");
 		proc->fds->entries  = malloc(sizeof(fs_node_t *) * proc->fds->capacity);
-		proc->fds->modes    = malloc(sizeof(int) * proc->fds->capacity);
-		proc->fds->offsets  = malloc(sizeof(uint64_t) * proc->fds->capacity);
 		assert(proc->fds->entries && "Failed to allocate file descriptor table for new process.");
 		debug_print(INFO,"    ---");
 		for (uint32_t i = 0; i < parent->fds->length; ++i) {
 			proc->fds->entries[i] = clone_fs(parent->fds->entries[i]);
-			proc->fds->modes[i]   = parent->fds->modes[i];
-			proc->fds->offsets[i] = parent->fds->offsets[i];
 		}
 		debug_print(INFO,"    }");
 	}
@@ -450,7 +435,6 @@ process_t * spawn_process(volatile process_t * parent, int reuse_fds) {
 	/* Zero out the process status */
 	proc->status = 0;
 	proc->finished = 0;
-	proc->suspended = 0;
 	proc->started = 0;
 	proc->running = 0;
 	memset(proc->signals.functions, 0x00, sizeof(uintptr_t) * NUMSIGNALS);
@@ -590,9 +574,6 @@ uint32_t process_append_fd(process_t * proc, fs_node_t * node) {
 	for (unsigned int i = 0; i < proc->fds->length; ++i) {
 		if (!proc->fds->entries[i]) {
 			proc->fds->entries[i] = node;
-			/* modes, offsets must be set by caller */
-			proc->fds->modes[i] = 0;
-			proc->fds->offsets[i] = 0;
 			return i;
 		}
 	}
@@ -600,13 +581,8 @@ uint32_t process_append_fd(process_t * proc, fs_node_t * node) {
 	if (proc->fds->length == proc->fds->capacity) {
 		proc->fds->capacity *= 2;
 		proc->fds->entries = realloc(proc->fds->entries, sizeof(fs_node_t *) * proc->fds->capacity);
-		proc->fds->modes   = realloc(proc->fds->modes,   sizeof(int) * proc->fds->capacity);
-		proc->fds->offsets = realloc(proc->fds->offsets, sizeof(uint64_t) * proc->fds->capacity);
 	}
 	proc->fds->entries[proc->fds->length] = node;
-	/* modes, offsets must be set by caller */
-	proc->fds->modes[proc->fds->length] = 0;
-	proc->fds->offsets[proc->fds->length] = 0;
 	proc->fds->length++;
 	return proc->fds->length-1;
 }
@@ -621,7 +597,7 @@ uint32_t process_append_fd(process_t * proc, fs_node_t * node) {
  * @return The destination file descriptor, -1 on failure
  */
 uint32_t process_move_fd(process_t * proc, int src, int dest) {
-	if ((size_t)src >= proc->fds->length || (dest != -1 && (size_t)dest >= proc->fds->length)) {
+	if ((size_t)src > proc->fds->length || (dest != -1 && (size_t)dest > proc->fds->length)) {
 		return -1;
 	}
 	if (dest == -1) {
@@ -630,8 +606,6 @@ uint32_t process_move_fd(process_t * proc, int src, int dest) {
 	if (proc->fds->entries[dest] != proc->fds->entries[src]) {
 		close_fs(proc->fds->entries[dest]);
 		proc->fds->entries[dest] = proc->fds->entries[src];
-		proc->fds->modes[dest] = proc->fds->modes[src];
-		proc->fds->offsets[dest] = proc->fds->offsets[src];
 		open_fs(proc->fds->entries[dest], 0);
 	}
 	return dest;
@@ -784,8 +758,6 @@ void cleanup_process(process_t * proc, int retval) {
 		}
 		debug_print(INFO, "... and their storage %d", proc->id);
 		free(proc->fds->entries);
-		free(proc->fds->offsets);
-		free(proc->fds->modes);
 		free(proc->fds);
 		debug_print(INFO, "... and the kernel stack (hope this ain't us) %d", proc->id);
 		free((void *)(proc->image.stack - KERNEL_STACK_SIZE));
@@ -802,18 +774,15 @@ void reap_process(process_t * proc) {
 }
 
 static int wait_candidate(process_t * parent, int pid, int options, process_t * proc) {
+	(void)options; /* there is only one option that affects candidacy, and we don't support it yet */
+
 	if (!proc) return 0;
 
-	if (options & WNOKERN) {
-		/* Skip kernel processes */
-		if (proc->is_tasklet) return 0;
-	}
-
 	if (pid < -1) {
-		if (proc->job == -pid || proc->id == -pid) return 1;
+		if (proc->group == -pid || proc->id == -pid) return 1;
 	} else if (pid == 0) {
 		/* Matches our group ID */
-		if (proc->job == parent->id) return 1;
+		if (proc->group == parent->id) return 1;
 	} else if (pid > 0) {
 		/* Specific pid */
 		if (proc->id == pid) return 1;
@@ -848,10 +817,6 @@ int waitpid(int pid, int * status, int options) {
 					candidate = child;
 					break;
 				}
-				if ((options & WSTOPPED) && child->suspended) {
-					candidate = child;
-					break;
-				}
 			}
 		}
 
@@ -867,12 +832,10 @@ int waitpid(int pid, int * status, int options) {
 				*status = candidate->status;
 			}
 			int pid = candidate->id;
-			if (candidate->finished) {
-				reap_process(candidate);
-			}
+			reap_process(candidate);
 			return pid;
 		} else {
-			if (options & WNOHANG) {
+			if (options & 1) {
 				return 0;
 			}
 			debug_print(INFO, "Sleeping until queue is done.");
