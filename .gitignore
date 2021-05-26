@@ -16,6 +16,7 @@
 /cdrom/netinit
 /cdrom/mod/*
 /cdrom/ramdisk.img
+/cdrom/ramdisk.igz
 /cdrom/boot.sys
 /cdrom/fat.img
 /fatbase/extra
@@ -23,12 +24,14 @@
 /fatbase/netinit
 /fatbase/mod/*
 /fatbase/ramdisk.img
+/fatbase/ramdisk.igz
 /fatbase/efi/boot/bootia32.efi
 /util/tarballs
 /util/build
 /util/local
 /util/devtable
 /util/tmp-gcc
+/util/kuroko
 /kernel/symbols.S
 /base/usr/python
 /base/usr/bin/*

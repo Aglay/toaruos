@@ -3,9 +3,11 @@
 #  include <efilib.h>
 EFI_HANDLE ImageHandleIn;
 #else
-#  include "types.h"
+# include <stdint.h>
+# include <stddef.h>
 #endif
 
+#define _BOOT_LOADER
 #include "ata.h"
 #include "text.h"
 #include "util.h"
@@ -17,6 +19,7 @@ EFI_HANDLE ImageHandleIn;
 #include "multiboot.h"
 #include "kbd.h"
 #include "options.h"
+#include "inflate.h"
 
 /* Basic text strings */
 #define BASE_VERSION "ToaruOS Bootloader v2.1"
@@ -49,14 +52,11 @@ EFI_HANDLE ImageHandleIn;
 
 char * module_dir = "MOD";
 char * kernel_path = "KERNEL.";
-char * ramdisk_path = "RAMDISK.IMG";
+char * ramdisk_path = "RAMDISK.IGZ";
 
 #ifdef EFI_PLATFORM
 int _efi_do_mode_set = 0;
 #endif
-
-/* Where to dump kernel data while loading */
-#define KERNEL_LOAD_START 0x300000
 
 /* Module file names - need to be ordered. */
 static char * modules[] = {

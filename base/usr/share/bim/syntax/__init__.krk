@@ -1,4 +1,8 @@
-from bim import SyntaxState, bindHighlighter as bind
+from bim import SyntaxState, bindHighlighter
+
+def bind(cls):
+    bindHighlighter(cls)
+    return cls
 
 class Highlighter(SyntaxState):
 
@@ -36,14 +40,12 @@ class Highlighter(SyntaxState):
             else:
                 self.paint(1, self.FLAG_STRING)
 
+    @staticmethod
     def isalpha(c):
-        if isinstance(c,int):
-            if c <= 0: return False
-            c = chr(c)
-        return c in 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ'
+        c = c if isinstance(c,int) else ord(c) if c else -1
+        return (c >= ord('a') and c <= ord('z')) or (c >= ord('A') and c <= ord('Z'))
 
+    @staticmethod
     def isalnum(c):
-        if isinstance(c,int):
-            if c <= 0: return False
-            c = chr(c)
-        return c in 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
+        c = c if isinstance(c,int) else ord(c) if c else -1
+        return (c >= ord('a') and c <= ord('z')) or (c >= ord('A') and c <= ord('Z')) or (c >= ord('0') and c <= ord('9'))

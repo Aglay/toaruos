@@ -643,11 +643,17 @@ static void load_directory(const char * path, int modifies_history) {
 						sprintf(f->icon, "font");
 						sprintf(f->filetype, "TrueType Font");
 					} else if (has_extension(f, ".tgz") || has_extension(f, ".tar.gz")) {
-						sprintf(f->icon, "package");
+						sprintf(f->icon, "package_targz");
 						sprintf(f->filetype, "Compressed Archive File");
 					} else if (has_extension(f, ".tar")) {
-						sprintf(f->icon, "package");
+						sprintf(f->icon, "package_tar");
 						sprintf(f->filetype, "Archive File");
+					} else if (has_extension(f, ".a")) {
+						sprintf(f->icon, "package_a");
+						sprintf(f->filetype, "Archive File");
+					} else if (has_extension(f, ".zip")) {
+						sprintf(f->icon, "package_zip");
+						sprintf(f->filetype, "ZIP Archive File");
 					} else if (has_extension(f, ".sh")) {
 						sprintf(f->icon, "sh");
 						if (statbuf.st_mode & 0111) {
@@ -656,6 +662,15 @@ static void load_directory(const char * path, int modifies_history) {
 							sprintf(f->filetype, "Executable Shell Script");
 						} else {
 							sprintf(f->filetype, "Shell Script");
+						}
+					} else if (has_extension(f, ".krk")) {
+						sprintf(f->icon, "krk");
+						if (statbuf.st_mode & 0111) {
+							/* Make executable */
+							sprintf(f->launcher, "SELF");
+							sprintf(f->filetype, "Executable Kuroko Script");
+						} else {
+							sprintf(f->filetype, "Kuroko Script");
 						}
 					} else if (has_extension(f, ".py")) {
 						sprintf(f->icon, "py");
@@ -670,10 +685,10 @@ static void load_directory(const char * path, int modifies_history) {
 						sprintf(f->icon, "file");
 						sprintf(f->filetype, "Kernel Module");
 					} else if (has_extension(f, ".o")) {
-						sprintf(f->icon, "file");
+						sprintf(f->icon, "so");
 						sprintf(f->filetype, "Object File");
 					} else if (has_extension(f, ".so")) {
-						sprintf(f->icon, "file");
+						sprintf(f->icon, "so");
 						sprintf(f->filetype, "Shared Object File");
 					} else if (has_extension(f, ".S")) {
 						sprintf(f->icon, "file");

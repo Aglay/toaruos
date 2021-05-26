@@ -2,7 +2,7 @@
 
 ToaruOS is a hobbyist, educational, Unix-like operating system built entirely from scratch and capable of hosting Python 3 and GCC. It includes a kernel, bootloader, dynamic linker, C standard library, composited windowing system, package manager, and several utilities and applications. All components of the core operating system are original, providing a complete environment in approximately 80,000 lines of C and assembly, all of which is included in this repository.
 
-![Screenshot](https://user-images.githubusercontent.com/223546/71428063-a979be00-2701-11ea-952d-da68847b8751.png)
+![Screenshot](https://user-images.githubusercontent.com/223546/105782051-11f73680-5fb7-11eb-94ed-171334c3de74.png)
 *Demonstration of ToaruOS's UI, terminal emulator, and text editor.*
 
 ## History
@@ -30,6 +30,7 @@ ToaruOS 1.0 was released in January, 2017, and featured a Python userspace built
 - **ld.so** (dynamic linker/loader), [linker/linker.c](linker/linker.c), loads dynamically-linked ELF binaries.
 - **Esh** (shell), [apps/sh.c](apps/sh.c), supports pipes, redirections, variables, and more.
 - **MSK** (package manager), [apps/msk.c](apps/msk.c), with support for online package installation.
+- **Kuroko**, [kuroko/](https://kuroko-lang.github.io/), a dynamic bytecode-compiled programming language.
 
 ## Current Goals
 
@@ -37,7 +38,7 @@ The following projects are currently in progress:
 
 - **Improve POSIX coverage** especially in regards to signals, synchronization primitives, as well as by providing more common utilities.
 - **Continue to improve the C library** which remains quite incomplete compared to Newlib and is a major source of issues with bringing back old ports.
-- **Implement a native dynamic, interpreted programming language** to replace Python, which was used prior to ToaruOS 1.6.x to provide most of the desktop environment.
+- **Implement a native dynamic, interpreted programming language** to replace Python, which was used prior to ToaruOS 1.6.x to provide most of the desktop environment. *Completed!*
 - **Replace third-party development tools** to get the OS to a state where it is self-hosting with just the addition of a C compiler.
 - **Implement a C compiler toolchain** in [toarucc](https://github.com/klange/toarucc).
 
@@ -55,7 +56,7 @@ The build process has two parts: building a cross-compiler, and building the ope
 
 You can skip the process of building the cross-compiler toolchain (which doesn't get updated very often anyway) by using our pre-built toolchain through Docker:
 
-    git clone https://github.com/klange/toaruos
+    git clone --recursive https://github.com/klange/toaruos
     cd toaruos
     docker pull toaruos/build-tools:1.8.x
     docker run -v `pwd`:/root/toaruos -w /root/toaruos -e LANG=C.UTF-8 -t toaruos/build-tools:1.8.x util/build-in-docker.sh
@@ -184,7 +185,7 @@ ToaruOS is regularly mirrored to multiple Git hosting sites.
 
 ### IRC
 
-`#toaruos` on Freenode (`irc.freenode.net`)
+`#toaruos` on Freenode (`irc.libera.chat`)
 
 ## FAQs
 
@@ -202,6 +203,5 @@ ToaruOS has taken inspiration from Linux in its choice of binary formats, filesy
 
 ### Are there plans for a 64-bit port / SMP support?
 
-With the development of ToaruOS's "NIH" branch, a secondary goal in removing third-party dependencies was to make the operating system more viable for a 64-bit port. That said, the actual development of a 64-bit kernel is currently on pause while other goals are pursued. Due to the limited size of the development team, it is not feasible to continue work on the 64-bit kernel at this time.
+Yes, an x86-64/SMP-capable port is [in progress](https://github.com/toaruos) as of 2021.
 
-SMP support likely poses a larger challenge as the early toy design for ToaruOS did not take into account multiprocessor systems and thus many challenges exist in getting the kernel to a functioning state with SMP.
